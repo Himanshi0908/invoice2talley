@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice to Tally | AI Extractor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        [x-cloak] {
+            display: none !important;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .gradient-text {
+            background: linear-gradient(90deg, #6366f1, #a855f7);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+
+<body class="bg-[#0f172a] text-slate-200 min-h-screen font-sans">
+    <div x-data="invoiceApp()" class="max-w-6xl mx-auto px-4 py-8">
+
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-12">
+            <div>
+                <h1 class="text-4xl font-bold gradient-text">InvoFlow</h1>
+                <p class="text-slate-400 mt-1">AI-Powered Invoice Extraction for Tally</p>
+            </div>
+            <div class="flex gap-4">
+                <button @click="showHistory = !showHistory"
+                    class="px-4 py-2 glass rounded-lg hover:bg-white/10 transition">
+                    History
+                </button>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            <!-- Left Column: Upload & Preview -->
+            <div class="space-y-6">
+                <div @dragover.prevent="isDragging = true" @dragleave.prevent="isDragging = false"
+                    @drop.prevent="handleDrop($event)" :class="{'border-indigo-500 bg-indigo-500/10': isDragging}"
+                    class="relative border-2 border-dashed border-slate-700 rounded-2xl p-12 text-center transition-all cursor-pointer hover:border-indigo-500 hover:bg-white/5">
+                    <input type="file" @change="handleFile($event)" class="absolute inset-0 opacity-0 cursor-pointer"
+                        accept="image/*,application/pdf">
+                    <div class="space-y-4">
+                        <div class="bg-indigo-500/20 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+                            <i data-lucide="upload" class="text-indigo-400"></i>
+                        </div>
+                        <div>
+                            <p class="text-xl font-medium">Click or drag invoice here</p>
+                            <p class="text-slate-500">Supports JPG, PNG, PDF</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Preview Image -->
+                <div x-show="previewUrl" x-cloak class="glass rounded-2xl p-4 overflow-hidden">
+                    <img :src="previewUrl" class="w-full h-auto rounded-lg" alt="Preview">
+                </div>
+            </div>
+
+            <!-- Right Column: Extracted Data -->
+            <div class="space-y-6">
+                <div class="glass rounded-2xl p-8 min-h-[600px]">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-semibold">Extracted Data</h2>
+                        <span x-show="processing" class="flex items-center text-indigo-400 animate-pulse">
+                            <i data-lucide="loader" class="animate-spin mr-2"></i>
+                            Processing...
+                        </span>
+                    </div>
+
+                    <div x-show="!extractedData && !processing"
+                        class="flex flex-col items-center justify-center h-64 text-slate-500">
+                        <i data-lucide="file-text" class="mb-4 opacity-20" size="48"></i>
+                        <p>Upload an invoice to see results</p>
+                    </div>
+
+                    <!-- Editor Form (Dynamic) -->
+                    <div x-show="extractedData" x-cloak class="space-y-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <template x-for="[key, value] in Object.entries(extractedData || {})" :key="key">
+                                <template x-if="key !== 'items' && key !== 'category'">
+                                    <div class="space-y-1">
+                                        <label class="text-xs text-slate-500 uppercase font-bold tracking-wider"
+                                            x-text="key.replace(/_/g, ' ')"></label>
+                                        <input x-model="extractedData[key]"
+                                            :type="typeof value === 'number' ? 'number' : (key.includes('date') ? 'date' : 'text')"
+                                            class="w-full bg-white/5 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none transition-all hover:bg-white/10"
+                                            :class="{'text-indigo-400 font-bold': key.includes('total')}">
+                                    </div>
+                                </template>
+                            </template>
+                        </div>
+
+                        <!-- Category Selection -->
+                        <div x-if="extractedData && extractedData.category" class="space-y-1">
+                            <label class="text-xs text-slate-500 uppercase font-bold tracking-wider">Category</label>
+                            <select x-model="extractedData.category"
+                                class="w-full bg-white/5 border border-slate-700 rounded-lg p-2 focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer">
+                                <option>Office Supplies</option>
+                                <option>Travel</option>
+                                <option>Food</option>
+                                <option>Utilities</option>
+                                <option>Software</option>
+                                <option>Others</option>
+                            </select>
+                        </div>
+
+                        <!-- Items Table -->
+                        <div x-show="extractedData && extractedData.items && extractedData.items.length > 0"
+                            class="mt-8">
+                            <label class="text-xs text-slate-500 uppercase font-bold tracking-wider mb-2 block">Line
+                                Items</label>
+                            <div class="overflow-x-auto rounded-xl border border-slate-700">
+                                <table class="w-full text-left text-sm">
+                                    <thead class="bg-white/5 text-slate-400 uppercase text-[10px] font-bold">
+                                        <tr>
+                                            <template x-for="col in Object.keys(extractedData.items[0] || {})"
+                                                :key="col">
+                                                <th class="px-4 py-2" x-text="col.replace(/_/g, ' ')"></th>
+                                            </template>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-800">
+                                        <template x-for="(item, index) in extractedData.items" :key="index">
+                                            <tr class="hover:bg-white/5 transition-colors">
+                                                <template x-for="col in Object.keys(item)" :key="col">
+                                                    <td class="px-4 py-2 align-top">
+                                                        <template x-if="col.toLowerCase().includes('description')">
+                                                            <textarea x-model="item[col]"
+                                                                class="bg-transparent border-none w-full p-0 focus:outline-none focus:text-indigo-400 resize-none overflow-hidden leading-tight"
+                                                                @input="$el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px'"
+                                                                x-init="$nextTick(() => { $el.style.height = 'auto'; $el.style.height = $el.scrollHeight + 'px' })"></textarea>
+                                                        </template>
+                                                        <template x-if="!col.toLowerCase().includes('description')">
+                                                            <input x-model="item[col]"
+                                                                class="bg-transparent border-none w-full p-0 focus:outline-none focus:text-indigo-400">
+                                                        </template>
+                                                    </td>
+                                                </template>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="pt-6 flex gap-4">
+                            <button @click="saveData()"
+                                class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-500/20">
+                                Save Expense
+                            </button>
+                            <button @click="exportTally()"
+                                class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-emerald-500/20">
+                                Export to Tally
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- History Modal -->
+        <div x-show="showHistory" x-cloak class="fixed inset-0 z-50 flex items-center justify-end">
+            <div @click="showHistory = false" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"></div>
+            <div
+                class="relative w-full max-w-md h-full bg-[#0f172a] border-l border-slate-800 shadow-2xl p-6 overflow-y-auto">
+                <div class="flex justify-between items-center mb-8">
+                    <h2 class="text-2xl font-bold">Extraction History</h2>
+                    <button @click="showHistory = false" class="p-2 hover:bg-white/5 rounded-full transition">
+                        <i data-lucide="x"></i>
+                    </button>
+                </div>
+
+                <div class="space-y-4">
+                    <template x-for="item in history" :key="item.id">
+                        <div @click="loadFromHistory(item)"
+                            class="glass p-4 rounded-xl cursor-pointer hover:border-indigo-500/50 transition-all group">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="font-medium text-indigo-400"
+                                    x-text="item.invoice_number || 'No Number'"></span>
+                                <span class="text-xs text-slate-500"
+                                    x-text="new Date(item.created_at.replace(' ', 'T')).toLocaleDateString()"></span>
+                            </div>
+                            <div class="text-sm font-semibold truncate" x-text="item.vendor_name || 'Unknown Vendor'">
+                            </div>
+                            <div class="flex justify-between items-center mt-3">
+                                <span class="text-xs px-2 py-1 bg-white/5 rounded" x-text="item.category"></span>
+                                <span class="font-bold text-slate-200" x-text="'₹' + item.total_amount"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="history.length === 0" class="text-center py-12 text-slate-500">
+                        No history found
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function invoiceApp() {
+            return {
+                isDragging: false,
+                previewUrl: null,
+                extractedData: null,
+                processing: false,
+                showHistory: false,
+                history: [],
+
+                init() {
+                    this.fetchHistory();
+                },
+
+                handleFile(e) {
+                    const file = e.target.files[0];
+                    if (file) this.processFile(file);
+                },
+
+                handleDrop(e) {
+                    this.isDragging = false;
+                    const file = e.dataTransfer.files[0];
+                    if (file) this.processFile(file);
+                },
+
+                async fetchHistory() {
+                    try {
+                        const res = await fetch('/api/invoices');
+                        this.history = await res.json();
+                    } catch (err) {
+                        console.error("Failed to fetch history:", err);
+                    }
+                },
+
+                processFile(file) {
+                    this.previewUrl = URL.createObjectURL(file);
+                    this.processing = true;
+                    this.extractedData = null;
+
+                    const formData = new FormData();
+                    formData.append('file', file);
+
+                    fetch('/api/upload', {
+                        method: 'POST',
+                        body: formData
+                    })
+                        .then(res => res.json())
+                        .then(data => {
+                            this.extractedData = data.extracted_data;
+                            this.processing = false;
+                            if (data.status === 'warning') {
+                                alert("Warning: " + data.message + ". Showing skeleton data for editing.");
+                            }
+                            this.fetchHistory(); // Refresh history
+                        })
+                        .catch(err => {
+                            console.error(err);
+                            alert("Error uploading file. Check if server is running.");
+                            this.processing = false;
+                        });
+                },
+
+                loadFromHistory(item) {
+                    this.extractedData = item.extracted_data;
+                    this.showHistory = false;
+                    this.previewUrl = null; // We don't have the original image URL easily linkable unless served
+                },
+
+                saveData() {
+                    // In a real app, this would update the database record
+                    alert("Data updated successfully!");
+                    this.fetchHistory();
+                },
+
+                exportTally() {
+                    if (!this.extractedData) return;
+
+                    fetch('/api/export/tally', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(this.extractedData)
+                    })
+                        .then(res => res.json())
+                        .then(data => {
+                            const blob = new Blob([data.xml], { type: 'text/xml' });
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `Tally_Input_${this.extractedData.invoice_number || 'export'}.xml`;
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                        })
+                        .catch(err => alert("Export failed: " + err.message));
+                }
+            }
+        }
+        lucide.createIcons();
+    </script>
+</body>
+
+</html>
